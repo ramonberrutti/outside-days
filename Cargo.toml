@@ -1,0 +1,13 @@
+[package]
+name = "outside-days"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+leptos = { version = "0.8.15", features = ["csr"] }
+leptos_router = "0.8.11"
+leptos_meta = "0.8.5"
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4.43", default-features = false, features = ["alloc", "std", "serde"] }
+web-sys = { version = "0.3.85" }
+console_error_panic_hook = { version = "0.1.7" }
