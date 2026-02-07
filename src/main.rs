@@ -1,16 +1,15 @@
 use chrono::NaiveDate;
 use leptos::prelude::*;
-use leptos_meta::*;
-use leptos::*;
 use leptos::view;
+use leptos::*;
+use leptos_meta::*;
 use serde::{Deserialize, Serialize};
-use leptos::logging::log;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Trip {
-    id: u32,
     depart: NaiveDate,
     ret: NaiveDate,
+    description: Option<String>,
 }
 
 impl Trip {
@@ -28,64 +27,121 @@ fn parse_date(s: &str) -> Option<NaiveDate> {
 fn App() -> impl IntoView {
     provide_meta_context();
 
-    let next_id = RwSignal::new(1u32);
-
     let trips = RwSignal::new(vec![Trip {
-        id: 0,
         depart: NaiveDate::from_ymd_opt(2026, 2, 6).unwrap(),
         ret: NaiveDate::from_ymd_opt(2026, 2, 8).unwrap(),
+        description: None,
     }]);
 
-    // TODO: move to separate component
-    let new_depart = RwSignal::new("2026-03-01".to_string());
-    let new_return = RwSignal::new("2026-03-10".to_string());
-
-    let add_trip = move |_| {
-        let d = parse_date(&new_depart.get());
-        let r = parse_date(&new_return.get());
-        if let (Some(depart), Some(ret)) = (d, r) {
-            // TODO: Validate that the trip is valid (depart < return) and that it doesn't overlap with existing trips
-            let id = next_id.get();
-            next_id.set(id + 1);
-            trips.update(|v| v.push(Trip { id, depart, ret }));
-
-            log!("New trip added!!");
+    let add_trip = move |trip: Trip| -> Result<usize, &str> {
+        // Check if the trip overlaps with existing trips
+        if trips
+            .get()
+            .iter()
+            .any(|t| t.depart <= trip.depart && t.ret >= trip.ret)
+        {
+            return Err("Trip overlaps with existing trip");
         }
+
+        // Get the index of the first trip that is after the new trip
+        let index = trips
+            .get()
+            .iter()
+            .position(|t| t.depart > trip.depart)
+            .unwrap_or(trips.get().len());
+
+        // Add in order of departure
+        trips.update(|v| v.insert(index, Trip { ..trip }));
+
+        Ok(index)
     };
 
     view! {
-        <div class="max-w-6xl mx-auto p-6">
+        <PageShell>
             <Header />
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-                    <h2 class="text-lg font-semibold mb-3">"Trips"</h2>
-
+            <Content>
+                <Panel title="Trips">
                     <TripForm
-                        new_depart=new_depart
-                        new_return=new_return
                         on_add=add_trip
                     />
 
                     <div class="space-y-3">
                         <TripList
                             trips=trips.read_only()
-                            on_remove=move |id| trips.update(|v| v.retain(|x| x.id != id))
+                            on_remove=move |index| trips.update(|v| { v.remove(index); })
                         />
                     </div>
-                </section>
-            </div>
+                </Panel>
+
+                <Panel title="Results" />
+            </Content>
             <Footer />
+        </PageShell>
+    }
+}
+
+#[component]
+fn PageShell(children: Children) -> impl IntoView {
+    view! {
+        <div class="max-w-6xl mx-auto p-6">
+            {children()}
         </div>
     }
 }
 
+#[component]
+fn Content(children: Children) -> impl IntoView {
+    view! {
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {children()}
+        </div>
+    }
+}
 
 #[component]
-fn TripForm(
-    new_depart: RwSignal<String>,
-    new_return: RwSignal<String>,
-    on_add: impl Fn(ev::MouseEvent) + 'static + Clone,
-) -> impl IntoView {
+fn Panel(title: &'static str, #[prop(optional)] children: Option<Children>) -> impl IntoView {
+    view! {
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <h2 class="text-lg font-semibold mb-3">{title}</h2>
+            {children.map(|c| c())}
+        </section>
+    }
+}
+
+#[component]
+fn TripForm(on_add: impl Fn(Trip) -> Result<usize, &'static str> + 'static) -> impl IntoView {
+    let (error, set_error) = signal::<Option<String>>(None);
+    let new_depart = RwSignal::new("2026-03-01".to_string());
+    let new_return = RwSignal::new("2026-03-10".to_string());
+
+    // Validate that the trip is valid (depart < return) and that it doesn't overlap with existing trips
+    let create_trip = move || {
+        let d = parse_date(&new_depart.get());
+        let r = parse_date(&new_return.get());
+        if let (Some(depart), Some(ret)) = (d, r) {
+            if depart >= ret {
+                return Err("Depart date must be before return date");
+            }
+            return Ok(Trip {
+                depart,
+                ret,
+                description: None,
+            });
+        }
+        Err("Invalid trip")
+    };
+
+    let on_submit = move |_ev: ev::MouseEvent| {
+        let result = create_trip();
+        if let Err(e) = result {
+            set_error.set(Some(e.to_string()));
+        } else if let Err(e) = on_add(result.unwrap()) {
+            set_error.set(Some(e.to_string()));
+        } else {
+            set_error.set(None);
+        }
+    };
+
     view! {
         <div class="flex flex-col sm:flex-row gap-3 items-end mb-4">
             <div class="flex-1">
@@ -110,26 +166,30 @@ fn TripForm(
 
             <button
                 class="rounded-lg bg-slate-900 text-white px-4 py-2 hover:bg-slate-800"
-                on:click=on_add
+                on:click=on_submit
             >
                 "Add trip"
             </button>
-        </div> 
+
+        </div>
+        <ErrorBox error=error />
     }
 }
-
 
 #[component]
 fn TripList(
     trips: ReadSignal<Vec<Trip>>,
-    on_remove: impl Fn(u32) + 'static + Clone + Send,
+    on_remove: impl Fn(usize) + 'static + Clone + Send,
 ) -> impl IntoView {
     view! {
-        <For
+        <ForEnumerate
             each=move || trips.get()
-            key=|t| t.id
-            children=move |trip: Trip| {
+            key=|t| t.depart.to_string()
+            children=move |index, trip: Trip| {
                 let on_remove = on_remove.clone();
+                let on_remove = move||{
+                   on_remove(index.get());
+                };
                 view! {
                     <TripRow trip=trip on_remove=on_remove />
                 }
@@ -139,10 +199,7 @@ fn TripList(
 }
 
 #[component]
-fn TripRow(
-    trip: Trip,
-    on_remove: impl Fn(u32) + 'static + Clone,
-) -> impl IntoView {
+fn TripRow(trip: Trip, on_remove: impl Fn() + 'static + Clone) -> impl IntoView {
     view! {
         <div class="flex items-center justify-between rounded-lg border border-slate-200 p-3">
             <div>
@@ -156,7 +213,7 @@ fn TripRow(
 
             <button
                 class="text-sm rounded-lg border border-slate-300 px-3 py-1.5 hover:bg-slate-50"
-                on:click=move |_| on_remove(trip.id)
+                on:click=move |_| on_remove()
             >
                 "Remove"
             </button>
@@ -164,6 +221,14 @@ fn TripRow(
     }
 }
 
+#[component]
+fn ErrorBox(error: ReadSignal<Option<String>>) -> impl IntoView {
+    view! {
+        <div class:hidden=move || error.get().is_none() class="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            {move || error.get().map(|e| view! { <p class="text-red-500">{e}</p> })}
+        </div>
+    }
+}
 
 #[component]
 fn Header() -> impl IntoView {
