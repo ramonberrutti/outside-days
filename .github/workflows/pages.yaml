@@ -1,0 +1,51 @@
+name: Pages
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write # for committing to the gh-pages branch
+  pages: write # for deploying to GitHub Pages
+  id-token: write # for authentication to GitHub API
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  release:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+
+    - name: Add WASM target
+      run: rustup target add wasm32-unknown-unknown
+
+    - name: Install Trunk binary
+      run: wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
+
+    - name: Build the project
+      run: ./trunk build --release --public-url "${GITHUB_REPOSITORY#*/}"
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v5
+      with:
+        enablement: true
+
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v4
+      with:
+        path: ./dist
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
