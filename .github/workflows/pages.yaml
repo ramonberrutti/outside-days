@@ -36,6 +36,9 @@ jobs:
     - name: Build the project
       run: ./trunk build --release
 
+    - name: Add CNAME for GitHub Pages
+      run: echo "outside-days.ramonberrutti.com" > dist/CNAME
+
     - name: Setup Pages
       uses: actions/configure-pages@v5
       with:
