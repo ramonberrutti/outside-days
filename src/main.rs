@@ -6,6 +6,7 @@ use leptos::view;
 use leptos::*;
 use leptos_meta::*;
 use trip::Trip;
+use std::collections::BTreeMap;
 
 fn parse_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
@@ -64,7 +65,9 @@ fn App() -> impl IntoView {
                     </div>
                 </Panel>
 
-                <Panel title="Results" />
+                <Panel title="Results">
+                    <Results trips=trips.read_only() limit=180 />
+                </Panel>
             </Content>
             <Footer />
         </PageShell>
@@ -220,6 +223,107 @@ fn ErrorBox(error: ReadSignal<Option<String>>) -> impl IntoView {
             class="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"
         >
             {move || error.get().map(|e| view! { <p class="text-red-500">{e}</p> })}
+        </div>
+    }
+}
+
+#[component]
+fn Results(
+    trips: ReadSignal<Vec<Trip>>,
+    limit: usize,
+) -> impl IntoView {
+
+    let days_outside: Memo<(BTreeMap<NaiveDate, usize>, usize, usize)> = Memo::new(move |_| {
+        let trips = move ||trips.get();
+        let days = Trip::calculate_outside_days(&trips());
+        let outside_days = days.len();
+        let rolling_max = *days.values().max().unwrap_or(&0) as usize;
+        (days, outside_days, rolling_max)
+    });
+
+    let days_outside_only = Memo::new(move |_| {
+        let (days, _, _) = days_outside.get();
+        days    
+    });
+
+    view! {
+        { move || {
+            let (_, total_outside, rolling_max) = days_outside.get();
+            view! {
+                <StatsRow
+                    total_outside=total_outside
+                    rolling_max=rolling_max
+                    limit=limit
+                />
+            }
+        }}
+        <DaysOutsideTable days_outside=days_outside_only.into() limit=limit />
+    }
+}
+
+#[component]
+fn StatsRow(
+    total_outside: usize,
+    rolling_max: usize,
+    limit: usize,
+) -> impl IntoView {
+    view! {
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <StatCard label="Total outside days" value=total_outside.to_string() />
+            <StatCard label="12-month max" value=rolling_max.to_string() />
+            <StatCard label="Limit" value=limit.to_string()/>
+        </div>
+    }
+}
+
+#[component]
+fn StatCard(
+    label: &'static str,
+    value: String,
+) -> impl IntoView {
+    view! {
+        <div class="rounded-lg border border-slate-200 p-3">
+            <div class="text-sm text-slate-600">{label}</div>
+            <div class="text-2xl font-semibold">{value}</div>
+        </div>
+    }
+}
+
+#[component]
+fn DaysOutsideTable(
+    days_outside: Signal<BTreeMap<NaiveDate, usize>>,
+    limit: usize,
+) -> impl IntoView {
+    view! {
+        <div class="overflow-x-auto rounded-lg border border-slate-200">
+            <table class="w-full text-left text-sm">
+                <thead class="border-b border-slate-200 bg-slate-50 text-slate-600">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">"Date"</th>
+                        <th class="px-4 py-3 font-medium text-right">"Count"</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                    <For
+                        each=move || days_outside.get()
+                        key=|d| format!("{}-{}", d.0, d.1)
+                        children=move |(day, count)| {
+                            let over_limit = count > limit;
+                            view! {
+                                <tr
+                                    class:bg-red-50=move || over_limit
+                                    class:border-l-4=move || over_limit
+                                    class:border-red-400=move || over_limit
+                                    class="hover:bg-slate-50"
+                                >
+                                    <td class="px-4 py-2.5">{day.to_string()}</td>
+                                    <td class="px-4 py-2.5 text-right tabular-nums">{count.to_string()}</td>
+                                </tr>
+                            }
+                        }
+                    />
+                </tbody>
+            </table>
         </div>
     }
 }

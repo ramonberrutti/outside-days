@@ -1,5 +1,6 @@
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Trip {
@@ -32,6 +33,27 @@ impl Trip {
 
     pub fn get_return(&self) -> NaiveDate {
         self.ret
+    }
+
+    pub fn get_description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn calculate_outside_days(trips: &[Trip]) -> BTreeMap<NaiveDate, usize> {
+        let mut all_days_outside = BTreeMap::new();
+        for trip in trips {
+            let mut d = trip.get_depart() + Duration::days(1);
+            while d < trip.get_return() {
+                // Get the day one year ago from the current day
+                let one_year_ago = d - Duration::days(365);
+                // Iterate over the days in the hashmap and count.
+                let count = all_days_outside.range(one_year_ago..=d).count();
+                
+                all_days_outside.insert(d, count + 1);
+                d += Duration::days(1);
+            }
+        }
+        all_days_outside
     }
 }
 
@@ -96,5 +118,31 @@ mod test {
         let b = Trip::new(date(2026, 1, 2), date(2026, 1, 4), String::new());
         assert!(a.overlap(&b));
         assert!(b.overlap(&a));
+    }
+
+    #[test]
+    fn calculate_outside_days_returns_correct_number_of_days() {
+        let trips = vec![
+            Trip::new(date(2026, 1, 1), date(2026, 1, 5), String::new()),
+            Trip::new(date(2026, 1, 6), date(2026, 1, 10), String::new()),
+        ];
+        let outside_days = Trip::calculate_outside_days(&trips);
+        assert_eq!(outside_days.len(), 6);
+
+        let expected: Vec<(NaiveDate, Option<usize>)> = vec![
+            (date(2026, 1, 1), None),
+            (date(2026, 1, 2), Some(1)),
+            (date(2026, 1, 3), Some(2)),
+            (date(2026, 1, 4), Some(3)),
+            (date(2026, 1, 5), None),
+            (date(2026, 1, 6), None),
+            (date(2026, 1, 7), Some(4)),
+            (date(2026, 1, 8), Some(5)),
+            (date(2026, 1, 9), Some(6)),
+            (date(2026, 1, 10), None),
+        ];
+        for (d, count) in expected {
+            assert_eq!(outside_days.get(&d), count.as_ref(), "date {}", d);
+        }
     }
 }
