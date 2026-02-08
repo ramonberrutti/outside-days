@@ -1,0 +1,100 @@
+use chrono::NaiveDate;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Trip {
+    depart: NaiveDate,
+    ret: NaiveDate,
+    description: String,
+}
+
+impl Trip {
+    pub fn new(depart: NaiveDate, ret: NaiveDate, description: String) -> Self {
+        Trip {
+            depart,
+            ret,
+            description,
+        }
+    }
+
+    // Difference in days between depart and return, exclusive.
+    pub fn interval(&self) -> usize {
+        self.ret.signed_duration_since(self.depart).num_days() as usize - 1
+    }
+
+    pub fn overlap(&self, trip: &Trip) -> bool {
+        trip.depart < self.ret && self.depart < trip.ret
+    }
+
+    pub fn get_depart(&self) -> NaiveDate {
+        self.depart
+    }
+
+    pub fn get_return(&self) -> NaiveDate {
+        self.ret
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use super::Trip;
+    use chrono::NaiveDate;
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn new_creates_trip_with_given_fields() {
+        let d = date(2026, 2, 6);
+        let r = date(2026, 2, 10);
+        let t = Trip::new(d, r, "Holiday".to_string());
+        assert_eq!(t.get_depart(), d);
+        assert_eq!(t.get_return(), r);
+    }
+
+    #[test]
+    fn interval_is_full_days_between_exclusive() {
+        // Mon 2 Feb -> Wed 4 Feb => only Tue 3 Feb = 1 day
+        let t = Trip::new(date(2026, 2, 2), date(2026, 2, 4), String::new());
+        assert_eq!(t.interval(), 1);
+    }
+
+    #[test]
+    fn interval_zero_when_depart_one_day_before_return() {
+        let t = Trip::new(date(2026, 2, 6), date(2026, 2, 7), String::new());
+        assert_eq!(t.interval(), 0);
+    }
+
+    #[test]
+    fn no_overlap_when_other_ends_when_we_start() {
+        let a = Trip::new(date(2026, 1, 1), date(2026, 1, 5), String::new());
+        let b = Trip::new(date(2026, 1, 5), date(2026, 1, 10), String::new());
+        assert!(!a.overlap(&b));
+        assert!(!b.overlap(&a));
+    }
+
+    #[test]
+    fn no_overlap_when_other_starts_when_we_end() {
+        let a = Trip::new(date(2026, 1, 5), date(2026, 1, 10), String::new());
+        let b = Trip::new(date(2026, 1, 1), date(2026, 1, 5), String::new());
+        assert!(!a.overlap(&b));
+    }
+
+    #[test]
+    fn overlap_when_intervals_share_days() {
+        let a = Trip::new(date(2026, 1, 1), date(2026, 1, 10), String::new());
+        let b = Trip::new(date(2026, 1, 4), date(2026, 1, 6), String::new());
+        assert!(a.overlap(&b));
+        assert!(b.overlap(&a));
+    }
+
+    #[test]
+    fn overlap_when_one_fully_contains_other() {
+        let a = Trip::new(date(2026, 1, 1), date(2026, 1, 5), String::new());
+        let b = Trip::new(date(2026, 1, 2), date(2026, 1, 4), String::new());
+        assert!(a.overlap(&b));
+        assert!(b.overlap(&a));
+    }
+}

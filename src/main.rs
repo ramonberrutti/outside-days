@@ -1,23 +1,11 @@
+mod trip;
+
 use chrono::NaiveDate;
 use leptos::prelude::*;
 use leptos::view;
 use leptos::*;
 use leptos_meta::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Trip {
-    depart: NaiveDate,
-    ret: NaiveDate,
-    description: String,
-}
-
-impl Trip {
-    // Difference in days between depart and return, exclusive.
-    fn interval(&self) -> usize {
-        self.ret.signed_duration_since(self.depart).num_days() as usize - 1
-    }
-}
+use trip::Trip;
 
 fn parse_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
@@ -27,31 +15,31 @@ fn parse_date(s: &str) -> Option<NaiveDate> {
 fn App() -> impl IntoView {
     provide_meta_context();
 
-    let trips = RwSignal::new(vec![Trip {
-        depart: NaiveDate::from_ymd_opt(2026, 2, 6).unwrap(),
-        ret: NaiveDate::from_ymd_opt(2026, 2, 8).unwrap(),
-        description: String::from("example trip!"),
-    }]);
+    let trips = RwSignal::new(vec![Trip::new(
+        NaiveDate::from_ymd_opt(2026, 2, 6).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 2, 8).unwrap(),
+        String::from("example trip!"),
+    )]);
 
     let add_trip = move |trip: Trip| -> Result<usize, String> {
         // Check if the trip overlaps with existing trips
         if let Some(t) = trips
             .get()
             .iter()
-            .find(|t| t.depart < trip.ret && trip.depart < t.ret )
+            .find(|t| trip.overlap(t) )
         {
-            return Err(format!("Trip overlaps with the trip: {} → {}", t.depart, t.ret));
+            return Err(format!("Trip overlaps with the trip: {} → {}", t.get_depart(), t.get_return()));
         }
 
         // Get the index of the first trip that is after the new trip
         let index = trips
             .get()
             .iter()
-            .position(|t| t.depart > trip.depart)
+            .position(|t| t.get_depart() > trip.get_depart())
             .unwrap_or(trips.get().len());
 
         // Add in order of departure
-        trips.update(|v| v.insert(index, Trip { ..trip }));
+        trips.update(|v| v.insert(index, trip));
 
         Ok(index)
     };
@@ -119,11 +107,11 @@ fn TripForm(on_add: impl Fn(Trip) -> Result<usize, String> + 'static) -> impl In
             if depart >= ret {
                 return Err("Depart date must be before return date");
             }
-            return Ok(Trip {
+            return Ok(Trip::new(
                 depart,
                 ret,
                 description,
-            });
+            ));
         }
         Err("Invalid trip")
     };
@@ -191,7 +179,7 @@ fn TripList(
     view! {
         <ForEnumerate
             each=move || trips.get()
-            key=|t| t.depart.to_string()
+            key=|t| t.get_depart().to_string()
             children=move |index, trip: Trip| {
                 let on_remove = on_remove.clone();
                 let on_remove = move || {
@@ -208,7 +196,7 @@ fn TripRow(trip: Trip, on_remove: impl Fn() + 'static + Clone) -> impl IntoView 
     view! {
         <div class="flex items-center justify-between rounded-lg border border-slate-200 p-3">
             <div>
-                <div class="font-medium">{format!("{} → {}", trip.depart, trip.ret)}</div>
+                <div class="font-medium">{format!("{} → {}", trip.get_depart(), trip.get_return())}</div>
                 <div class="text-sm text-slate-600">
                     {format!("Counted days: {}", trip.interval())}
                 </div>
