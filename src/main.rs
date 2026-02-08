@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 struct Trip {
     depart: NaiveDate,
     ret: NaiveDate,
-    description: Option<String>,
+    description: String,
 }
 
 impl Trip {
@@ -30,17 +30,17 @@ fn App() -> impl IntoView {
     let trips = RwSignal::new(vec![Trip {
         depart: NaiveDate::from_ymd_opt(2026, 2, 6).unwrap(),
         ret: NaiveDate::from_ymd_opt(2026, 2, 8).unwrap(),
-        description: None,
+        description: String::from("example trip!"),
     }]);
 
-    let add_trip = move |trip: Trip| -> Result<usize, &str> {
+    let add_trip = move |trip: Trip| -> Result<usize, String> {
         // Check if the trip overlaps with existing trips
-        if trips
+        if let Some(t) = trips
             .get()
             .iter()
-            .any(|t| t.depart <= trip.depart && t.ret >= trip.ret)
+            .find(|t| t.depart < trip.ret && trip.depart < t.ret )
         {
-            return Err("Trip overlaps with existing trip");
+            return Err(format!("Trip overlaps with the trip: {} → {}", t.depart, t.ret));
         }
 
         // Get the index of the first trip that is after the new trip
@@ -61,14 +61,17 @@ fn App() -> impl IntoView {
             <Header />
             <Content>
                 <Panel title="Trips">
-                    <TripForm
-                        on_add=add_trip
-                    />
+                    <TripForm on_add=add_trip />
 
                     <div class="space-y-3">
                         <TripList
                             trips=trips.read_only()
-                            on_remove=move |index| trips.update(|v| { v.remove(index); })
+                            on_remove=move |index| {
+                                trips
+                                    .update(|v| {
+                                        v.remove(index);
+                                    })
+                            }
                         />
                     </div>
                 </Panel>
@@ -82,20 +85,12 @@ fn App() -> impl IntoView {
 
 #[component]
 fn PageShell(children: Children) -> impl IntoView {
-    view! {
-        <div class="max-w-6xl mx-auto p-6">
-            {children()}
-        </div>
-    }
+    view! { <div class="max-w-6xl mx-auto p-6">{children()}</div> }
 }
 
 #[component]
 fn Content(children: Children) -> impl IntoView {
-    view! {
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {children()}
-        </div>
-    }
+    view! { <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">{children()}</div> }
 }
 
 #[component]
@@ -109,15 +104,17 @@ fn Panel(title: &'static str, #[prop(optional)] children: Option<Children>) -> i
 }
 
 #[component]
-fn TripForm(on_add: impl Fn(Trip) -> Result<usize, &'static str> + 'static) -> impl IntoView {
+fn TripForm(on_add: impl Fn(Trip) -> Result<usize, String> + 'static) -> impl IntoView {
     let (error, set_error) = signal::<Option<String>>(None);
-    let new_depart = RwSignal::new("2026-03-01".to_string());
-    let new_return = RwSignal::new("2026-03-10".to_string());
+    let depart_date = RwSignal::new("2026-03-01".to_string());
+    let return_date = RwSignal::new("2026-03-10".to_string());
+    let description = RwSignal::new(String::new());
 
     // Validate that the trip is valid (depart < return) and that it doesn't overlap with existing trips
     let create_trip = move || {
-        let d = parse_date(&new_depart.get());
-        let r = parse_date(&new_return.get());
+        let d = parse_date(&depart_date.get());
+        let r = parse_date(&return_date.get());
+        let description = description.get();
         if let (Some(depart), Some(ret)) = (d, r) {
             if depart >= ret {
                 return Err("Depart date must be before return date");
@@ -125,7 +122,7 @@ fn TripForm(on_add: impl Fn(Trip) -> Result<usize, &'static str> + 'static) -> i
             return Ok(Trip {
                 depart,
                 ret,
-                description: None,
+                description,
             });
         }
         Err("Invalid trip")
@@ -143,34 +140,44 @@ fn TripForm(on_add: impl Fn(Trip) -> Result<usize, &'static str> + 'static) -> i
     };
 
     view! {
-        <div class="flex flex-col sm:flex-row gap-3 items-end mb-4">
-            <div class="flex-1">
-                <label class="block text-sm text-slate-600 mb-1">"Depart"</label>
-                <input
-                    class="w-full rounded-lg border border-slate-300 px-3 py-2"
-                    prop:value=move || new_depart.get()
-                    on:input=move |ev| new_depart.set(event_target_value(&ev))
-                    type="date"
+        <div class="flex flex-col gap-3 mb-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:gap-3 sm:items-end">
+                <div class="flex-1 min-w-0">
+                    <label class="block text-sm text-slate-600 mb-1">"Depart"</label>
+                    <input
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                        prop:value=move || depart_date.get()
+                        on:input=move |ev| depart_date.set(event_target_value(&ev))
+                        type="date"
+                    />
+                </div>
+
+                <div class="flex-1 min-w-0">
+                    <label class="block text-sm text-slate-600 mb-1">"Return"</label>
+                    <input
+                        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                        prop:value=move || return_date.get()
+                        on:input=move |ev| return_date.set(event_target_value(&ev))
+                        type="date"
+                    />
+                </div>
+            </div>
+            <div class="w-full min-w-0">
+                <label class="block text-sm text-slate-600 mb-1">Description (optional)</label>
+                <textarea
+                    class="w-full min-h-[4.5rem] rounded-lg border border-slate-300 px-3 py-2 text-base resize-y"
+                    prop:value=move || description.get()
+                    on:input=move |ev| description.set(event_target_value(&ev))
+                    placeholder="e.g. Trip to Argentina"
+                    rows=1
                 />
             </div>
-
-            <div class="flex-1">
-                <label class="block text-sm text-slate-600 mb-1">"Return"</label>
-                <input
-                    class="w-full rounded-lg border border-slate-300 px-3 py-2"
-                    prop:value=move || new_return.get()
-                    on:input=move |ev| new_return.set(event_target_value(&ev))
-                    type="date"
-                />
-            </div>
-
             <button
-                class="rounded-lg bg-slate-900 text-white px-4 py-2 hover:bg-slate-800"
+                class="w-full sm:w-auto rounded-lg bg-slate-900 text-white px-4 py-2.5 hover:bg-slate-800 text-base touch-manipulation"
                 on:click=on_submit
             >
                 "Add trip"
             </button>
-
         </div>
         <ErrorBox error=error />
     }
@@ -187,12 +194,10 @@ fn TripList(
             key=|t| t.depart.to_string()
             children=move |index, trip: Trip| {
                 let on_remove = on_remove.clone();
-                let on_remove = move||{
-                   on_remove(index.get());
+                let on_remove = move || {
+                    on_remove(index.get());
                 };
-                view! {
-                    <TripRow trip=trip on_remove=on_remove />
-                }
+                view! { <TripRow trip=trip on_remove=on_remove /> }
             }
         />
     }
@@ -203,9 +208,7 @@ fn TripRow(trip: Trip, on_remove: impl Fn() + 'static + Clone) -> impl IntoView 
     view! {
         <div class="flex items-center justify-between rounded-lg border border-slate-200 p-3">
             <div>
-                <div class="font-medium">
-                    {format!("{} → {}", trip.depart, trip.ret)}
-                </div>
+                <div class="font-medium">{format!("{} → {}", trip.depart, trip.ret)}</div>
                 <div class="text-sm text-slate-600">
                     {format!("Counted days: {}", trip.interval())}
                 </div>
@@ -224,7 +227,10 @@ fn TripRow(trip: Trip, on_remove: impl Fn() + 'static + Clone) -> impl IntoView 
 #[component]
 fn ErrorBox(error: ReadSignal<Option<String>>) -> impl IntoView {
     view! {
-        <div class:hidden=move || error.get().is_none() class="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        <div
+            class:hidden=move || error.get().is_none()
+            class="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"
+        >
             {move || error.get().map(|e| view! { <p class="text-red-500">{e}</p> })}
         </div>
     }
