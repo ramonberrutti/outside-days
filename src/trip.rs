@@ -2,7 +2,7 @@ use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Trip {
     depart: NaiveDate,
     ret: NaiveDate,
@@ -54,6 +54,36 @@ impl Trip {
             }
         }
         all_days_outside
+    }
+
+    pub fn export_csv(trips: &[Trip]) -> String {
+        let mut csv = String::new();
+        csv.push_str("Depart,Return,Description\n");
+        for trip in trips {
+            csv.push_str(&format!("{},{},\"{}\"\n", trip.get_depart(), trip.get_return(), trip.get_description()));
+        }
+        csv
+    }
+
+    pub fn import_csv(csv: &str) -> Result<Vec<Trip>, String> {
+        let mut trips = Vec::new();
+        for line in csv.lines() {
+            let parts = line.split(',').collect::<Vec<&str>>();
+            if parts.len() != 3 {
+                continue;
+            }
+
+            // Skip header line
+            if parts[0] == "Depart" {
+                continue;
+            }
+
+            let depart = NaiveDate::parse_from_str(parts[0], "%Y-%m-%d").map_err(|e| format!("Invalid date: {}: {}", parts[0], e))?;
+            let ret = NaiveDate::parse_from_str(parts[1], "%Y-%m-%d").map_err(|e| format!("Invalid date: {}: {}", parts[1], e))?;
+            let description = String::from(parts[2].trim_matches('"'));
+            trips.push(Trip::new(depart, ret, description));
+        }
+        Ok(trips)
     }
 }
 
@@ -144,5 +174,18 @@ mod test {
         for (d, count) in expected {
             assert_eq!(outside_days.get(&d), count.as_ref(), "date {}", d);
         }
+    }
+
+    #[test]
+    fn export_csv_import_csv_returns_correct_csv() {
+        let trips = vec![
+            Trip::new(date(2026, 1, 1), date(2026, 1, 5), "Holiday".to_string()),
+            Trip::new(date(2026, 1, 6), date(2026, 1, 10), "Business".to_string()),
+        ];
+        let csv = Trip::export_csv(&trips);
+        assert_eq!(csv, "Depart,Return,Description\n2026-01-01,2026-01-05,\"Holiday\"\n2026-01-06,2026-01-10,\"Business\"\n");
+
+        let imported_trips = Trip::import_csv(&csv).unwrap();
+        assert_eq!(imported_trips, trips);
     }
 }
