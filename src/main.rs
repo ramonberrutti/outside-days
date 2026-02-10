@@ -1,4 +1,5 @@
 mod trip;
+mod exporter;
 
 use chrono::NaiveDate;
 use leptos::prelude::*;
@@ -62,6 +63,30 @@ fn App() -> impl IntoView {
                                     })
                             }
                         />
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row gap-3 mt-4">
+                        <button
+                            type="button"
+                            class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            on:click=move |_| exporter::import_file_picker(move |result| {
+                                match result {
+                                    Ok(imported) => trips.set(imported),
+                                    Err(e) => leptos::logging::log!("Import error: {}", e),
+                                }
+                            })
+                        >
+                            "Import CSV"
+                        </button>
+
+                        <button
+                            type="button"
+                            class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            on:click=move |_| exporter::export_download(&trips.get())
+                        >
+                            "Export CSV"
+                        </button>
+
                     </div>
                 </Panel>
 
