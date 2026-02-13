@@ -39,6 +39,9 @@ jobs:
     - name: Add CNAME for GitHub Pages
       run: echo "outside-days.ramonberrutti.com" > dist/CNAME
 
+    - name: Replace 404 page
+      run: cp dist/index.html dist/404.html
+
     - name: Setup Pages
       uses: actions/configure-pages@v5
       with:
