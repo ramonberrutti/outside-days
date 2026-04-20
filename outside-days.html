@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Days Outside Calculator</title>
+
+  <!-- Tailwind via CDN for demo (your Leptos app should compile Tailwind locally) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-2xl font-semibold">Days Outside Calculator</h1>
+      <p class="text-slate-600 mt-1">
+        Counts full days between depart and return (exclusive). Example: depart Fri, return Sun → counts Sat only.
+      </p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Trips panel -->
+      <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <h2 class="text-lg font-semibold mb-3">Trips</h2>
+
+        <div class="flex flex-col sm:flex-row gap-3 items-end mb-4">
+          <div class="flex-1">
+            <label class="block text-sm text-slate-600 mb-1">Depart</label>
+            <input id="departInput" type="date"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2"
+              value="2026-05-01" />
+          </div>
+
+          <div class="flex-1">
+            <label class="block text-sm text-slate-600 mb-1">Return</label>
+            <input id="returnInput" type="date"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2"
+              value="2026-05-14" />
+          </div>
+
+          <button id="addTripBtn"
+            class="rounded-lg bg-slate-900 text-white px-4 py-2 hover:bg-slate-800">
+            Add trip
+          </button>
+        </div>
+
+        <div id="errorBox" class="hidden mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"></div>
+
+        <div id="tripsList" class="space-y-3"></div>
+      </section>
+
+      <!-- Results panel -->
+      <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <h2 class="text-lg font-semibold mb-3">Results</h2>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div class="rounded-lg border border-slate-200 p-3">
+            <div class="text-sm text-slate-600">Total outside days</div>
+            <div id="totalOutside" class="text-2xl font-semibold">0</div>
+          </div>
+          <div class="rounded-lg border border-slate-200 p-3">
+            <div class="text-sm text-slate-600">12-month max</div>
+            <div id="rollingMax" class="text-2xl font-semibold">0</div>
+          </div>
+          <div class="rounded-lg border border-slate-200 p-3">
+            <div class="text-sm text-slate-600">Limit</div>
+            <div class="text-2xl font-semibold">180</div>
+          </div>
+        </div>
+
+        <div id="statusBox" class="mb-4"></div>
+
+        <h3 class="font-semibold mb-2">Outside days (unique)</h3>
+        <div class="max-h-80 overflow-auto rounded-lg border border-slate-200">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-slate-100 text-slate-700">
+              <tr><th class="text-left px-3 py-2">Date</th></tr>
+            </thead>
+            <tbody id="outsideDaysTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <footer class="mt-6 text-sm text-slate-500">
+      Rule reminder: depart/return days are not counted; only full days in between are.
+    </footer>
+  </div>
+
+  <script>
+    // ---------------------------
+    // Helpers (dates)
+    // ---------------------------
+    const LIMIT = 180;
+
+    function parseDate(s) {
+      // "YYYY-MM-DD" -> Date at UTC midnight to avoid timezone shifts
+      if (!s || typeof s !== "string") return null;
+      const [y, m, d] = s.split("-").map(Number);
+      if (!y || !m || !d) return null;
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      // basic validity check:
+      if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== (m - 1) || dt.getUTCDate() !== d) return null;
+      return dt;
+    }
+
+    function fmtDateUTC(dt) {
+      const y = dt.getUTCFullYear();
+      const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+      const d = String(dt.getUTCDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function addDaysUTC(dt, n) {
+      const out = new Date(dt.getTime());
+      out.setUTCDate(out.getUTCDate() + n);
+      return out;
+    }
+
+    // Counted days: all full days between depart and return, exclusive.
+    // depart Fri, return Sun => counts Sat only.
+    function outsideDaysForTrip(depart, ret) {
+      const set = new Set();
+      if (!(depart && ret) || ret <= depart) return set;
+
+      let d = addDaysUTC(depart, 1);
+      while (d < ret) {
+        set.add(fmtDateUTC(d));
+        d = addDaysUTC(d, 1);
+      }
+      return set;
+    }
+
+    // Rolling 12-month max: use "previous year same month/day", clamp down if invalid (e.g., Feb 29).
+    function subtractOneYearClamped(dt) {
+      const y = dt.getUTCFullYear() - 1;
+      const m = dt.getUTCMonth(); // 0-based
+      const day = dt.getUTCDate();
+
+      // Try same day; if invalid, clamp downward
+      for (let dd = day; dd >= 1; dd--) {
+        const candidate = new Date(Date.UTC(y, m, dd));
+        if (candidate.getUTCFullYear() === y && candidate.getUTCMonth() === m && candidate.getUTCDate() === dd) {
+          return candidate;
+        }
+      }
+      return new Date(Date.UTC(y, m, 1));
+    }
+
+    function rolling12moMax(outsideDaysSorted) {
+      if (!outsideDaysSorted.length) return null;
+
+      // Convert "YYYY-MM-DD" -> Date
+      const dates = outsideDaysSorted.map(parseDate).filter(Boolean);
+
+      let best = { count: 0, start: dates[0], end: dates[0] };
+      let left = 0;
+
+      for (let right = 0; right < dates.length; right++) {
+        const end = dates[right];
+        const start = subtractOneYearClamped(end);
+
+        while (left <= right && dates[left] < start) left++;
+
+        const count = right - left + 1;
+        if (count > best.count) {
+          best = { count, start, end };
+        }
+      }
+      return best;
+    }
+
+    // ---------------------------
+    // State
+    // ---------------------------
+    let trips = [
+      { id: 0, depart: "2026-02-06", ret: "2026-02-08" },
+      { id: 1, depart: "2026-03-01", ret: "2026-03-10" },
+      { id: 2, depart: "2026-04-15", ret: "2026-04-20" },
+    ];
+    let nextId = 3;
+
+    // ---------------------------
+    // DOM refs
+    // ---------------------------
+    const departInput = document.getElementById("departInput");
+    const returnInput = document.getElementById("returnInput");
+    const addTripBtn = document.getElementById("addTripBtn");
+    const tripsList = document.getElementById("tripsList");
+
+    const errorBox = document.getElementById("errorBox");
+
+    const totalOutside = document.getElementById("totalOutside");
+    const rollingMax = document.getElementById("rollingMax");
+    const statusBox = document.getElementById("statusBox");
+    const outsideDaysTable = document.getElementById("outsideDaysTable");
+
+    // ---------------------------
+    // UI helpers
+    // ---------------------------
+    function showError(msg) {
+      if (!msg) {
+        errorBox.classList.add("hidden");
+        errorBox.textContent = "";
+        return;
+      }
+      errorBox.textContent = msg;
+      errorBox.classList.remove("hidden");
+    }
+
+    function render() {
+      // Render trips list
+      tripsList.innerHTML = "";
+      for (const t of trips) {
+        const depart = parseDate(t.depart);
+        const ret = parseDate(t.ret);
+        const counted = (depart && ret) ? outsideDaysForTrip(depart, ret).size : 0;
+
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between rounded-lg border border-slate-200 p-3";
+
+        row.innerHTML = `
+          <div>
+            <div class="font-medium">${t.depart} → ${t.ret}</div>
+            <div class="text-sm text-slate-600">Counted days: ${counted}</div>
+          </div>
+          <button class="text-sm rounded-lg border border-slate-300 px-3 py-1.5 hover:bg-slate-50">Remove</button>
+        `;
+
+        row.querySelector("button").addEventListener("click", () => {
+          trips = trips.filter(x => x.id !== t.id);
+          render();
+        });
+
+        tripsList.appendChild(row);
+      }
+
+      // Compute all outside days (unique)
+      const outsideSet = new Set();
+      for (const t of trips) {
+        const depart = parseDate(t.depart);
+        const ret = parseDate(t.ret);
+        const set = outsideDaysForTrip(depart, ret);
+        for (const d of set) outsideSet.add(d);
+      }
+      const outsideDaysSorted = Array.from(outsideSet).sort();
+
+      // Update stats
+      totalOutside.textContent = String(outsideDaysSorted.length);
+
+      const roll = rolling12moMax(outsideDaysSorted);
+      const max = roll ? roll.count : 0;
+      rollingMax.textContent = String(max);
+
+      // Status box
+      if (!roll) {
+        statusBox.innerHTML = `
+          <div class="rounded-lg p-3 border border-slate-200 bg-slate-50 text-slate-700">
+            No outside days yet.
+          </div>
+        `;
+      } else {
+        const ok = max <= LIMIT;
+        statusBox.innerHTML = `
+          <div class="rounded-lg p-3 border ${ok ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}">
+            <div class="font-medium">${ok ? "Within limit" : "Over limit"}</div>
+            <div class="text-sm text-slate-700 mt-1">
+              Worst window: ${fmtDateUTC(roll.start)} to ${fmtDateUTC(roll.end)} (${max} days outside)
+            </div>
+            <div class="text-xs text-slate-500 mt-1">
+              Window is the 12 months ending on the shown end date.
+            </div>
+          </div>
+        `;
+      }
+
+      // Table of outside days
+      outsideDaysTable.innerHTML = outsideDaysSorted
+        .map(d => `<tr class="border-t border-slate-200"><td class="px-3 py-2">${d}</td></tr>`)
+        .join("");
+    }
+
+    // ---------------------------
+    // Events
+    // ---------------------------
+    function validateInputs() {
+      const d = parseDate(departInput.value);
+      const r = parseDate(returnInput.value);
+
+      if (!d || !r) {
+        showError("Please enter both dates.");
+        return null;
+      }
+      if (r <= d) {
+        showError("Return date must be after departure date.");
+        return null;
+      }
+      showError(null);
+      return { depart: fmtDateUTC(d), ret: fmtDateUTC(r) };
+    }
+
+    departInput.addEventListener("input", () => showError(null));
+    returnInput.addEventListener("input", () => showError(null));
+
+    addTripBtn.addEventListener("click", () => {
+      const valid = validateInputs();
+      if (!valid) return;
+
+      trips.push({ id: nextId++, ...valid });
+      render();
+    });
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>

@@ -35,6 +35,11 @@ jobs:
 
     - name: Build the project
       run: ./trunk build --release
+      env:
+        ENVIRONMENT: production
+        GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+        FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+        REDIRECT_URI: ${{ vars.REDIRECT_URI }}
 
     - name: Add CNAME for GitHub Pages
       run: echo "outside-days.ramonberrutti.com" > dist/CNAME

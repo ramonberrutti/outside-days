@@ -1,6 +1,7 @@
 use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use serde_json::json;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Trip {
@@ -37,6 +38,19 @@ impl Trip {
 
     pub fn get_description(&self) -> &str {
         &self.description
+    }
+
+    pub fn to_json(&self) -> String {
+        json!({
+            "depart": self.depart.to_string(),
+            "ret": self.ret.to_string(),
+            "description": self.description,
+        }).to_string()
+    }
+
+    pub fn from_json(json: &str) -> Result<Trip, String> {
+        let trip: Trip = serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {}", e))?;
+        Ok(trip)
     }
 
     pub fn calculate_outside_days(trips: &[Trip]) -> BTreeMap<NaiveDate, usize> {
@@ -83,6 +97,15 @@ impl Trip {
             let description = String::from(parts[2].trim_matches('"'));
             trips.push(Trip::new(depart, ret, description));
         }
+        Ok(trips)
+    }
+
+    pub fn to_json_array(trips: &[Trip]) -> String {
+        serde_json::json!(trips).to_string()
+    }
+
+    pub fn from_json_array(json: &str) -> Result<Vec<Trip>, String> {
+        let trips = json.split(',').map(|t| Trip::from_json(t)).collect::<Result<Vec<Trip>, String>>()?;
         Ok(trips)
     }
 }

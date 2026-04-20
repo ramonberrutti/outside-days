@@ -1,13 +1,17 @@
-mod trip;
 mod exporter;
+mod firebase;
+mod trip;
+mod utils;
 
 use chrono::NaiveDate;
+use leptos::logging::log;
 use leptos::prelude::*;
 use leptos::view;
 use leptos::*;
 use leptos_meta::*;
-use trip::Trip;
 use std::collections::BTreeMap;
+use trip::Trip;
+use wasm_bindgen_futures::spawn_local;
 
 fn parse_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
@@ -23,14 +27,16 @@ fn App() -> impl IntoView {
         String::from("example trip!"),
     )]);
 
+    let synced_with_google = RwSignal::new(false);
+
     let add_trip = move |trip: Trip| -> Result<usize, String> {
         // Check if the trip overlaps with existing trips
-        if let Some(t) = trips
-            .get()
-            .iter()
-            .find(|t| trip.overlap(t) )
-        {
-            return Err(format!("Trip overlaps with the trip: {} → {}", t.get_depart(), t.get_return()));
+        if let Some(t) = trips.get().iter().find(|t| trip.overlap(t)) {
+            return Err(format!(
+                "Trip overlaps with the trip: {} → {}",
+                t.get_depart(),
+                t.get_return()
+            ));
         }
 
         // Get the index of the first trip that is after the new trip
@@ -42,6 +48,10 @@ fn App() -> impl IntoView {
 
         // Add in order of departure
         trips.update(|v| v.insert(index, trip));
+        // firebase::save_trips(&trips.get());
+        if synced_with_google.get() {
+            log!("Syncing with Google");
+        }
 
         Ok(index)
     };
@@ -67,12 +77,26 @@ fn App() -> impl IntoView {
 
                     <div class="flex flex-col sm:flex-row gap-3 mt-4">
                         <button
+                            disabled=synced_with_google.get()
                             type="button"
                             class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
                             on:click=move |_| exporter::import_file_picker(move |result| {
                                 match result {
                                     Ok(imported) => trips.set(imported),
-                                    Err(e) => leptos::logging::log!("Import error: {}", e),
+                                    Err(e) => log!("Import error: {}", e),
+                                }
+                            })
+                        >
+                            "Sync with Google"
+                        </button>
+
+                        <button
+                            type="button"
+                            class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                            on:click=move |_| exporter::import_file_picker(move |result| {
+                                match result {
+                                    Ok(imported) => trips.set(imported),
+                                    Err(e) => log!("Import error: {}", e),
                                 }
                             })
                         >
@@ -95,6 +119,12 @@ fn App() -> impl IntoView {
                 </Panel>
             </Content>
             <Footer />
+            <button on:click=move |_| {
+                log!("Signing in with Google");
+                firebase::start_google_redirect();
+            }>
+                "Sign in with Google"
+            </button>
         </PageShell>
     }
 }
@@ -135,11 +165,7 @@ fn TripForm(on_add: impl Fn(Trip) -> Result<usize, String> + 'static) -> impl In
             if depart >= ret {
                 return Err("Depart date must be before return date");
             }
-            return Ok(Trip::new(
-                depart,
-                ret,
-                description,
-            ));
+            return Ok(Trip::new(depart, ret, description));
         }
         Err("Invalid trip")
     };
@@ -253,13 +279,9 @@ fn ErrorBox(error: ReadSignal<Option<String>>) -> impl IntoView {
 }
 
 #[component]
-fn Results(
-    trips: ReadSignal<Vec<Trip>>,
-    limit: usize,
-) -> impl IntoView {
-
+fn Results(trips: ReadSignal<Vec<Trip>>, limit: usize) -> impl IntoView {
     let days_outside: Memo<(BTreeMap<NaiveDate, usize>, usize, usize)> = Memo::new(move |_| {
-        let trips = move ||trips.get();
+        let trips = move || trips.get();
         let days = Trip::calculate_outside_days(&trips());
         let outside_days = days.len();
         let rolling_max = *days.values().max().unwrap_or(&0) as usize;
@@ -268,7 +290,7 @@ fn Results(
 
     let days_outside_only = Memo::new(move |_| {
         let (days, _, _) = days_outside.get();
-        days    
+        days
     });
 
     view! {
@@ -287,11 +309,7 @@ fn Results(
 }
 
 #[component]
-fn StatsRow(
-    total_outside: usize,
-    rolling_max: usize,
-    limit: usize,
-) -> impl IntoView {
+fn StatsRow(total_outside: usize, rolling_max: usize, limit: usize) -> impl IntoView {
     view! {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <StatCard label="Total outside days" value=total_outside.to_string() />
@@ -302,10 +320,7 @@ fn StatsRow(
 }
 
 #[component]
-fn StatCard(
-    label: &'static str,
-    value: String,
-) -> impl IntoView {
+fn StatCard(label: &'static str, value: String) -> impl IntoView {
     view! {
         <div class="rounded-lg border border-slate-200 p-3">
             <div class="text-sm text-slate-600">{label}</div>
@@ -391,5 +406,10 @@ fn Footer() -> impl IntoView {
 
 fn main() {
     console_error_panic_hook::set_once();
+
+    spawn_local(async {
+        firebase::handle_google_redirect().await;
+    });
+
     mount::mount_to_body(App);
 }
